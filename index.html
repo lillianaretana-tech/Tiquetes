@@ -9,10 +9,11 @@
 
 <script>
 // ═══════════════════════════════════════════════════════════════
-//  ⚙️  ÚNICO DATO QUE HAY QUE PONER:
-//  Pegá aquí la URL que te da Apps Script al hacer el Deploy
+//  ⚙️  ÚNICOS DATOS QUE HAY QUE PONER:
+//  Pegá aquí las URLs de los 2 webhooks que creaste en Make
 // ═══════════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz800QHI_oloxVYVt7-djJRo753izuA_XX43ioX2hCgNOMLLus0gT1EHFmx86AQ3z1DOw/exec";
+const MAKE_GET_URL  = "https://hook.us2.make.com/jl3pps3k2rdb145707x7ox3rkst3wfh1";   // Escenario: Leer tiquetes
+const MAKE_POST_URL = "https://hook.us2.make.com/pn1bp6u8so7n1q7m937neoo74s8eq3du"; // Escenario: Crear / Actualizar
 // ═══════════════════════════════════════════════════════════════
 
 const TECHS = {
@@ -211,7 +212,7 @@ tr:hover td{background:var(--surface2)}
 
   <!-- CONFIG WARN -->
   <div id="config-warn">
-    ⚙️ <strong>Falta configurar:</strong> Abrí el archivo en el Bloc de notas y reemplazá el valor de <code>APPS_SCRIPT_URL</code> con la URL que te da Apps Script al hacer el Deploy. <a href="#" onclick="alert('Ve a tu Google Sheet → Extensions → Apps Script → Deploy → New Deployment → Web App → Execute as: Me → Who has access: Anyone → Deploy. Copia la URL y pégala en el HTML.')" style="color:var(--amber)">¿Cómo?</a>
+    ⚙️ <strong>Falta configurar:</strong> Abrí el archivo en el Bloc de notas y reemplazá <code>MAKE_GET_URL</code> y <code>MAKE_POST_URL</code> con las URLs de tus webhooks de Make. <a href="#" onclick="alert('En Make: 1) Creá un escenario con Custom Webhook → Google Sheets → Webhook Response. 2) Copiá la URL del webhook y pegála en el HTML.')" style="color:var(--amber)">¿Cómo?</a>
   </div>
 
   <!-- ─── CLIENTE ─── -->
@@ -356,59 +357,35 @@ let chartInst = {};
 let autoTimer = null;
 
 // ═══════════════════════════════════════════════════
-//  API — Google Apps Script
+//  API — Make Webhooks (fetch, soporta CORS)
 // ═══════════════════════════════════════════════════
-// JSONP — evita CORS cuando el HTML corre local o desde GitHub Pages
-function callScript(params) {
-  return new Promise((resolve, reject) => {
-    const cbName = "fd_" + Date.now() + "_" + Math.floor(Math.random()*10000);
-    const qs = Object.entries({ ...params, callback: cbName })
-      .filter(([,v]) => v !== undefined && v !== null)
-      .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
-      .join("&");
-
-    window[cbName] = (data) => {
-      delete window[cbName];
-      const s = document.getElementById(cbName);
-      if (s) s.remove();
-      if (data && data.ok === false) reject(new Error(data.error || "Apps Script devolvió error"));
-      else resolve(data);
-    };
-
-    const script = document.createElement("script");
-    script.id = cbName;
-    script.src = APPS_SCRIPT_URL + "?" + qs;
-    script.onerror = () => {
-      delete window[cbName];
-      if (document.getElementById(cbName)) document.getElementById(cbName).remove();
-      reject(new Error("No se pudo conectar con Apps Script"));
-    };
-    document.head.appendChild(script);
-
-    setTimeout(() => {
-      if (window[cbName]) {
-        delete window[cbName];
-        if (document.getElementById(cbName)) document.getElementById(cbName).remove();
-        reject(new Error("Timeout — Apps Script no respondió"));
-      }
-    }, 15000);
-  });
-}
 
 async function apiGet() {
-  const data = await callScript({ action:"list" });
+  const resp = await fetch(MAKE_GET_URL, {
+    method: "GET",
+    headers: { "Accept": "application/json" }
+  });
+  if (!resp.ok) throw new Error(`Error HTTP ${resp.status}`);
+  const data = await resp.json();
   return Array.isArray(data.tickets) ? data.tickets : [];
 }
 
 async function apiPost(body) {
-  let params = {};
+  let payload = {};
   if (body.action === "create") {
-    params = { action:"create", ...body.ticket };
+    payload = { action: "create", ...body.ticket };
   } else if (body.action === "update") {
-    params = { action:"update", id: body.id, ...body.patch };
-    if (Array.isArray(params.notes)) params.notes = params.notes.join("|||");
+    payload = { action: "update", id: body.id, ...body.patch };
+    if (Array.isArray(payload.notes)) payload.notes = payload.notes.join("|||");
   }
-  return await callScript(params);
+
+  const resp = await fetch(MAKE_POST_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!resp.ok) throw new Error(`Error HTTP ${resp.status}`);
+  return await resp.json();
 }
 
 // ═══════════════════════════════════════════════════
@@ -438,7 +415,7 @@ function setLastSync(msg) {
     "Actualizado " + new Date().toLocaleTimeString("es-CR",{hour:"2-digit",minute:"2-digit"});
 }
 function checkConfig() {
-  const bad = APPS_SCRIPT_URL.includes("XXXX");
+  const bad = MAKE_GET_URL.startsWith("PEGA_") || MAKE_POST_URL.startsWith("PEGA_");
   document.getElementById("config-warn").style.display = bad ? "block" : "none";
   return !bad;
 }
