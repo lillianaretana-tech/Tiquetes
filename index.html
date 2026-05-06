@@ -12,7 +12,7 @@
 //  ⚙️  ÚNICO DATO QUE HAY QUE PONER:
 //  Pegá aquí la URL que te da Apps Script al hacer el Deploy
 // ═══════════════════════════════════════════════════════════════
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzocwku3wiX6MfA_mB0dbl9rMqFW665U0t-o8LXXFEMfxrstadbkaOqh8eTs01ccecaEg/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz800QHI_oloxVYVt7-djJRo753izuA_XX43ioX2hCgNOMLLus0gT1EHFmx86AQ3z1DOw/exec";
 // ═══════════════════════════════════════════════════════════════
 
 const TECHS = {
@@ -358,20 +358,46 @@ let autoTimer = null;
 // ═══════════════════════════════════════════════════
 //  API — Google Apps Script
 // ═══════════════════════════════════════════════════
-// Todo por GET — sin POST, sin CORS, funciona desde archivo local
-function buildUrl(params) {
-  const qs = Object.entries(params)
-    .filter(([,v]) => v !== undefined && v !== null)
-    .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
-    .join("&");
-  return APPS_SCRIPT_URL + "?" + qs;
+// JSONP — evita CORS cuando el HTML corre local o desde GitHub Pages
+function callScript(params) {
+  return new Promise((resolve, reject) => {
+    const cbName = "fd_" + Date.now() + "_" + Math.floor(Math.random()*10000);
+    const qs = Object.entries({ ...params, callback: cbName })
+      .filter(([,v]) => v !== undefined && v !== null)
+      .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
+      .join("&");
+
+    window[cbName] = (data) => {
+      delete window[cbName];
+      const s = document.getElementById(cbName);
+      if (s) s.remove();
+      if (data && data.ok === false) reject(new Error(data.error || "Apps Script devolvió error"));
+      else resolve(data);
+    };
+
+    const script = document.createElement("script");
+    script.id = cbName;
+    script.src = APPS_SCRIPT_URL + "?" + qs;
+    script.onerror = () => {
+      delete window[cbName];
+      if (document.getElementById(cbName)) document.getElementById(cbName).remove();
+      reject(new Error("No se pudo conectar con Apps Script"));
+    };
+    document.head.appendChild(script);
+
+    setTimeout(() => {
+      if (window[cbName]) {
+        delete window[cbName];
+        if (document.getElementById(cbName)) document.getElementById(cbName).remove();
+        reject(new Error("Timeout — Apps Script no respondió"));
+      }
+    }, 15000);
+  });
 }
 
 async function apiGet() {
-  const res  = await fetch(buildUrl({ action:"list" }), { redirect:"follow" });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error);
-  return json.tickets;
+  const data = await callScript({ action:"list" });
+  return Array.isArray(data.tickets) ? data.tickets : [];
 }
 
 async function apiPost(body) {
@@ -382,10 +408,7 @@ async function apiPost(body) {
     params = { action:"update", id: body.id, ...body.patch };
     if (Array.isArray(params.notes)) params.notes = params.notes.join("|||");
   }
-  const res  = await fetch(buildUrl(params), { redirect:"follow" });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error);
-  return json;
+  return await callScript(params);
 }
 
 // ═══════════════════════════════════════════════════
