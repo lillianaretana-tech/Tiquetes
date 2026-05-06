@@ -358,20 +358,31 @@ let autoTimer = null;
 // ═══════════════════════════════════════════════════
 //  API — Google Apps Script
 // ═══════════════════════════════════════════════════
+// Todo por GET — sin POST, sin CORS, funciona desde archivo local
+function buildUrl(params) {
+  const qs = Object.entries(params)
+    .filter(([,v]) => v !== undefined && v !== null)
+    .map(([k,v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
+    .join("&");
+  return APPS_SCRIPT_URL + "?" + qs;
+}
+
 async function apiGet() {
-  const res = await fetch(APPS_SCRIPT_URL, { redirect:"follow" });
+  const res  = await fetch(buildUrl({ action:"list" }), { redirect:"follow" });
   const json = await res.json();
   if (!json.ok) throw new Error(json.error);
   return json.tickets;
 }
 
 async function apiPost(body) {
-  const res = await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    redirect: "follow",
-    headers: { "Content-Type":"text/plain" },
-    body: JSON.stringify(body)
-  });
+  let params = {};
+  if (body.action === "create") {
+    params = { action:"create", ...body.ticket };
+  } else if (body.action === "update") {
+    params = { action:"update", id: body.id, ...body.patch };
+    if (Array.isArray(params.notes)) params.notes = params.notes.join("|||");
+  }
+  const res  = await fetch(buildUrl(params), { redirect:"follow" });
   const json = await res.json();
   if (!json.ok) throw new Error(json.error);
   return json;
